@@ -2,7 +2,7 @@
 applications:
 - name: nfs-volume-test
   memory: 256M
-  instances: 2
+  instances: 1
   buildpack: php_buildpack
   services:
   - nfs-volume

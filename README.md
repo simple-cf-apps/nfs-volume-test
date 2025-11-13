@@ -96,12 +96,17 @@ curl https://$APP_URL/files
 # Scale up to test multi-instance sharing
 cf scale nfs-volume-test -i 3
 
+# Get the app GUID
+APP_GUID=$(cf app nfs-volume-test --guid)
+
 # Write from different instances
-for i in {1..10}; do
+for i in {0..2}; do
+  echo "--- Writing to instance $i ---"
   curl -X POST https://$APP_URL/write \
     -H "Content-Type: application/json" \
-    -H "X-CF-APP-INSTANCE: $((i % 3)):0" \
-    -d "{\"message\": \"Test from request $i\"}"
+    -H "X-CF-APP-INSTANCE: $APP_GUID:$i" \
+    -d "{\"message\": \"Test from instance $i\"}"
+  echo ""
 done
 
 # Read from any instance - should see all writes
