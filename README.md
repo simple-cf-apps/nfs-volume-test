@@ -112,9 +112,3 @@ done
 # Read from any instance - should see all writes
 curl https://$APP_URL/read
 ```
-
-## Troubleshooting
-
-- If the volume is not mounting, check the NFS service configuration
-- Verify the NFS server is accessible from your Elastic Application Runtime deployment
-- Check application logs: `cf logs nfs-volume-test --recent`
