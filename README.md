@@ -112,3 +112,28 @@ done
 # Read from any instance - should see all writes
 curl https://$APP_URL/read
 ```
+
+## Troubleshooting
+
+### Check NFS Mounts on Diego Cells
+
+To verify that the NFS volume is properly mounted on the Diego cells where your app is running:
+```bash
+# Use the same NFS server variable from deployment
+NFS_SERVER="192.168.50.224"
+
+# Get the deployment name
+DEPLOYMENT=$(bosh deployments --column=name | grep cf- | head -1 | tr -d ' ')
+
+# Get unique Diego cell IDs where the app is running
+CELL_IDS=$(cf logs nfs-volume-test --recent | grep "creating container for instance" | grep -oP 'Cell \K[a-f0-9-]+' | uniq)
+
+# Check NFS mounts on each Diego cell where the app is deployed
+for CELL_ID in $CELL_IDS; do
+  DIEGO_INSTANCE="diego_cell/$CELL_ID"
+  echo "Checking $DIEGO_INSTANCE:"
+  bosh -d $DEPLOYMENT ssh $DIEGO_INSTANCE -c "mount | grep \"$NFS_SERVER\" | awk '{print \$3}'" 2>/dev/null | grep "^diego_cell.*stdout" | cut -d'|' -f2 | tr -d ' '
+done
+```
+
+This will show mount points from your NFS server across the Diego cells the app instances are running on, helping verify that the volume service is working correctly.
