@@ -31,7 +31,7 @@ cf target -o nfs-org -s nfs-space
 ```bash
 # Set your NFS server details
 NFS_SERVER="192.168.50.224"
-EXPORT_PATH="/srv/nfs/cf-volumes"
+EXPORT_PATH="/srv/nfs/tas-volumes"
 
 # Create the service instance
 cf create-service nfs Existing nfs-volume \
