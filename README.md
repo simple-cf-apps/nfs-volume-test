@@ -17,18 +17,33 @@ A Node.js application to test NFSv3 volume services in Elastic Application Runti
 
 ## Deployment Steps
 
-### 1. Create the NFS volume service instance
+### 1. Create an org and space for testing
 ```bash
-cf create-service nfs Existing nfs-volume \
-  -c '{
-    "share": "nfs://YOUR_NFS_SERVER/YOUR_EXPORT_PATH",
-    "mount": "/var/vcap/data/nfs-test"
-  }'
+# Create the org and space
+cf create-org nfs-org
+cf create-space nfs-space -o nfs-org
+
+# Target the org and space
+cf target -o nfs-org -s nfs-space
 ```
 
-Replace `YOUR_NFS_SERVER` and `YOUR_EXPORT_PATH` with your actual NFS server details.
+### 2. Create the NFS volume service instance
+```bash
+# Set your NFS server details
+NFS_SERVER="192.168.50.224"
+EXPORT_PATH="/srv/nfs/cf-volumes"
 
-### 2. Wait for service to be ready
+# Create the service instance
+cf create-service nfs Existing nfs-volume \
+  -c "{
+    \"share\": \"${NFS_SERVER}${EXPORT_PATH}\",
+    \"mount\": \"/var/vcap/data/nfs-test\"
+  }"
+```
+
+Replace the `NFS_SERVER` and `EXPORT_PATH` variables with your actual NFS server IP/hostname and export path.
+
+### 3. Wait for service to be ready
 ```bash
 cf services
 ```
