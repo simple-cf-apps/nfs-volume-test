@@ -1,10 +1,8 @@
-# Node.js
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# Composer dependencies
+vendor/
+composer.lock
 
-# Environment variables
+# Environment files
 .env
 .env.local
 
@@ -12,11 +10,17 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
-# IDE
+# IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# CF specific
-.cfignore
+# Logs
+*.log
+error_log
+access_log
+
+# Temp files
+*.tmp
+*.cache

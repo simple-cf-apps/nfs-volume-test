@@ -1,6 +1,6 @@
 # NFS Volume Test Application for Elastic Application Runtime
 
-A Node.js application to test NFSv3 volume services in Elastic Application Runtime foundations.
+A PHP application to test NFSv3 volume services in Elastic Application Runtime foundations.
 
 ## Features
 
@@ -48,14 +48,14 @@ Replace the `NFS_SERVER` and `EXPORT_PATH` variables with your actual NFS server
 cf services
 ```
 
-### 3. Push the application
+### 4. Push the application
 ```bash
 cf push
 ```
 
 The app will automatically bind to the service due to the manifest configuration.
 
-### 4. Check the app status
+### 5. Check the app status
 ```bash
 cf app nfs-volume-test
 ```

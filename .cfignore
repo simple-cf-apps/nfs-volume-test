@@ -1,0 +1,17 @@
+# Version control
+.git/
+.gitignore
+
+# Documentation (not needed in deployed app)
+README.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Logs
+*.log

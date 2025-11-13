@@ -1,10 +1,8 @@
 ---
 applications:
-  - name: nfs-volume-test
-    memory: 256M
-    instances: 2
-    buildpack: nodejs_buildpack
-    services:
-      - nfs-volume
-    env:
-      NODE_ENV: production
+- name: nfs-volume-test
+  memory: 256M
+  instances: 2
+  buildpack: php_buildpack
+  services:
+  - nfs-volume
