@@ -1,4 +1,0 @@
-{
-  "COMPOSER_INSTALL_OPTIONS": "--no-dev",
-  "WEBDIR": "."
-}

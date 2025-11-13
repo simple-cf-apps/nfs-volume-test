@@ -1,7 +1,0 @@
-{
-    "name": "nfs-volume-test",
-    "description": "Test app for NFS volume services in TAS",
-    "require": {
-        "php": "~8.2.0"
-    }
-}
