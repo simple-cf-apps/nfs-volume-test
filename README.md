@@ -32,13 +32,19 @@ cf target -o nfs-org -s nfs-space
 # Set your NFS server details
 NFS_SERVER="192.168.50.224"
 EXPORT_PATH="/srv/nfs/tas-volumes"
+NFS_USER_PASSWORD="<password>"
 
-# Create the service instance
-cf create-service nfs Existing nfs-volume \
-  -c "{
-    \"share\": \"${NFS_SERVER}${EXPORT_PATH}\",
-    \"mount\": \"/var/vcap/data/nfs-test\"
-  }"
+# Create the service instance - password in the clear for this simple example,
+# make sure to abstract in formal environments
+cat > /tmp/nfs-config.json <<'EOF'
+{
+  "share": "${NFS_SERVER}${EXPORT_PATH}",
+  "mount": "/var/vcap/data/nfs-test",
+  "username": "dev1",
+  "password": "${NFS_USER_PASSWORD}"
+}
+EOF
+cf create-service nfs Existing nfs-volume -c /tmp/nfs-config.json 
 ```
 
 Replace the `NFS_SERVER` and `EXPORT_PATH` variables with your actual NFS server IP/hostname and export path.
