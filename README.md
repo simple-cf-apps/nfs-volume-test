@@ -389,5 +389,4 @@ homeDirectory: /home/dev1
 
 ## Additional Resources
 
-- [TAS NFS Volume Services Documentation](https://docs.vmware.com/en/VMware-Tanzu-Application-Service/index.html)
 - [Cloud Foundry Volume Services](https://docs.cloudfoundry.org/devguide/services/using-vol-services.html)
