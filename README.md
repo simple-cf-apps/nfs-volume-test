@@ -314,7 +314,11 @@ Update your app's manifest to diagnose, add this to the manifest.yml:
     sleep infinity
 ```
 
-The mount path is available in `VCAP_SERVICES` under `volume_mounts[].container_dir`.
+Then look at logs for the output of the command included in the manifest:
+
+```bash
+cf logs nfs-volume-test --recent
+````
 
 ### Step 10: Check NFS Mounts on Diego Cells
 
