@@ -290,13 +290,7 @@ NFS_SERVER="192.168.50.224"
 bosh -d $DEPLOYMENT ssh diego_cell/0 -c "nc -zv $NFS_SERVER 2049 -w 5"
 ```
 
-Optionally, if `showmount` is available (requires `nfs-common` package), check exports:
-```bash
-
-showmount -e $NFS_SERVER
-```
-
-Or use `rpcinfo` to verify NFS services:
+Use `rpcinfo` to verify NFS services:
 ```bash
 rpcinfo -p $NFS_SERVER | grep nfs
 ```
@@ -305,18 +299,19 @@ rpcinfo -p $NFS_SERVER | grep nfs
 
 If LDAP is working but the app can't find the mount, verify the mount path:
 
-Update your app's manifest to diagnose:
+Update your app's manifest to diagnose, add this to the manifest.yml:
 
 ```yaml
-command: |
-  echo "=== NFS Volume Diagnostic ==="
-  echo "--- All mounts ---"
-  mount
-  echo "--- /var/vcap/data contents ---"
-  ls -la /var/vcap/data/
-  echo "--- VCAP_SERVICES ---"
-  echo $VCAP_SERVICES
-  sleep infinity
+  health-check-type: process
+  command: |
+    echo "=== NFS Volume Diagnostic ==="
+    echo "--- All mounts ---"
+    mount
+    echo "--- /var/vcap/data contents ---"
+    ls -la /var/vcap/data/
+    echo "--- VCAP_SERVICES ---"
+    echo $VCAP_SERVICES
+    sleep infinity
 ```
 
 The mount path is available in `VCAP_SERVICES` under `volume_mounts[].container_dir`.
