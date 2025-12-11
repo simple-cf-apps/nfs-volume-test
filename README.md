@@ -96,6 +96,9 @@ curl https://$APP_URL/read
 
 # List files
 curl https://$APP_URL/files
+
+# Check the mounted fs in the container
+cf ssh nfs-volume-test -c "ls -ltra /var/vcap/data/nfs-test"
 ```
 
 ### Multi-Instance Testing
@@ -130,7 +133,7 @@ First, set up the deployment and LDAP configuration variables for use in subsequ
 
 ```bash
 # Get the TAS deployment name
-DEPLOYMENT=$(bosh deployments --column=name | grep -E "^cf-|^tas-" | head -1 | tr -d ' ')
+DEPLOYMENT=$(bosh deployments --column=name | awk '/^cf-/ {print $1; exit}')
 
 # Extract LDAP configuration from the deployment manifest
 eval $(bosh -d $DEPLOYMENT manifest --json | jq -r '.Blocks[0]' | python3 -c 'import sys, yaml, json; print(json.dumps(yaml.safe_load(sys.stdin)))' | jq -r '.instance_groups[].jobs[] | select(.name == "nfsv3driver") | .properties.nfsv3driver | "LDAP_HOST=\(.ldap_host)\nLDAP_PORT=\(.ldap_port)\nLDAP_SVC_USER=\(.ldap_svc_user)\nLDAP_USER_FQDN=\(.ldap_user_fqdn)"')
@@ -144,23 +147,19 @@ echo "LDAP Host: $LDAP_HOST"
 echo "LDAP Port: $LDAP_PORT"
 echo "Bind DN: $LDAP_SVC_USER"
 echo "User Base: $LDAP_USER_FQDN"
+echo -e "LDAP Cert: \n$LDAP_CA_CERT"
 ```
 
 Get the LDAP service account password from CredHub or Ops Manager:
 
 ```bash
-# Option 1: From CredHub
-LDAP_SVC_PASSWORD=$(credhub get -n /opsmgr/$DEPLOYMENT/nfs_volume_driver/enable/ldap_service_account_password -q)
-
-# Option 2: Manually from Ops Manager UI
-# TAS tile → Credentials → NFS Volume Services → LDAP Service Account Password
-LDAP_SVC_PASSWORD="<password_from_opsman>"
+LDAP_SVC_PASSWORD=$(credhub get -n /opsmgr/$DEPLOYMENT/nfs_volume_driver/enable/ldap_service_account_password --output-json | jq -r '.value.value')
 ```
 
 ### Step 1: Check Application Logs for Error Messages
 
 ```bash
-cf logs <app-name> --recent | grep -i -E "(error|fail|denied|mount|ldap)"
+cf logs nfs-volume-test --recent | grep -i -E "(error|fail|denied|mount|ldap)"
 ```
 
 Common error messages and their meaning:
@@ -278,19 +277,29 @@ LDAPTLS_CACERT=/tmp/ldap-ca.pem ldapsearch -x -H ldaps://$LDAP_HOST:$LDAP_PORT \
 
 This must return the user with `uidNumber` and `gidNumber` for NFS mounting to work.
 
-### Step 8: Verify NFS Server Exports
 
-Ensure the NFS server exports are accessible from Diego cells:
+###
+Step 8: Verify NFS Server Connectivity
+
+Ensure the NFS server is accessible from Diego cells:
 
 ```bash
-# Get the NFS server IP from your service configuration
+# Set your NFS server IP from the service configuration
 NFS_SERVER="192.168.50.224"
 
 # Test NFS port connectivity from Diego cell
 bosh -d $DEPLOYMENT ssh diego_cell/0 -c "nc -zv $NFS_SERVER 2049 -w 5"
+```
 
-# Check NFS exports (from a host that can reach the NFS server)
+Optionally, if `showmount` is available (requires `nfs-common` package), check exports:
+```bash
+
 showmount -e $NFS_SERVER
+```
+
+Or use `rpcinfo` to verify NFS services:
+```bash
+rpcinfo -p $NFS_SERVER | grep nfs
 ```
 
 ### Step 9: Check Volume Mount Path in Application
