@@ -278,8 +278,7 @@ LDAPTLS_CACERT=/tmp/ldap-ca.pem ldapsearch -x -H ldaps://$LDAP_HOST:$LDAP_PORT \
 This must return the user with `uidNumber` and `gidNumber` for NFS mounting to work.
 
 
-###
-Step 8: Verify NFS Server Connectivity
+### Step 8: Verify NFS Server Connectivity
 
 Ensure the NFS server is accessible from Diego cells:
 
