@@ -1,6 +1,6 @@
-# NFS Volume Test Application for Elastic Application Runtime
+# NFS Volume Test Application for Tanzu Application Service
 
-A PHP application to test NFSv3 volume services in Elastic Application Runtime foundations.
+A PHP application to test NFSv3 volume services in Tanzu Application Service (TAS) foundations.
 
 ## Features
 
@@ -12,8 +12,9 @@ A PHP application to test NFSv3 volume services in Elastic Application Runtime f
 ## Prerequisites
 
 - Cloud Foundry CLI installed
-- Access to an Elastic Application Runtime environment with NFS volume services enabled
+- Access to a Tanzu Application Service environment with NFS volume services enabled
 - An NFS server with an exported share
+- LDAP server configured for NFS user authentication (if using LDAP mode)
 
 ## Deployment Steps
 
@@ -36,7 +37,7 @@ NFS_USER_PASSWORD="<password>"
 
 # Create the service instance - password in the clear for this simple example,
 # make sure to abstract in formal environments
-cat > /tmp/nfs-config.json <<'EOF'
+cat > /tmp/nfs-config.json <<EOF
 {
   "share": "${NFS_SERVER}${EXPORT_PATH}",
   "mount": "/var/vcap/data/nfs-test",
@@ -121,25 +122,265 @@ curl https://$APP_URL/read
 
 ## Troubleshooting
 
-### Check NFS Mounts on Diego Cells
+This section provides systematic steps to diagnose NFS volume service issues, particularly when LDAP authentication is configured.
 
-To verify that the NFS volume is properly mounted on the Diego cells where your app is running:
+### Step 0: Set Up Environment Variables
+
+First, set up the deployment and LDAP configuration variables for use in subsequent commands:
+
 ```bash
-# Use the same NFS server variable from deployment
+# Get the TAS deployment name
+DEPLOYMENT=$(bosh deployments --column=name | grep -E "^cf-|^tas-" | head -1 | tr -d ' ')
+
+# Extract LDAP configuration from the deployment manifest
+eval $(bosh -d $DEPLOYMENT manifest --json | jq -r '.Blocks[0]' | python3 -c 'import sys, yaml, json; print(json.dumps(yaml.safe_load(sys.stdin)))' | jq -r '.instance_groups[].jobs[] | select(.name == "nfsv3driver") | .properties.nfsv3driver | "LDAP_HOST=\(.ldap_host)\nLDAP_PORT=\(.ldap_port)\nLDAP_SVC_USER=\(.ldap_svc_user)\nLDAP_USER_FQDN=\(.ldap_user_fqdn)"')
+
+# Extract the LDAP CA certificate
+LDAP_CA_CERT=$(bosh -d $DEPLOYMENT manifest --json | jq -r '.Blocks[0]' | python3 -c 'import sys, yaml, json; print(json.dumps(yaml.safe_load(sys.stdin)))' | jq -r '.instance_groups[].jobs[] | select(.name == "nfsv3driver") | .properties.nfsv3driver.ldap_ca_cert')
+
+# Verify the variables are set
+echo "Deployment: $DEPLOYMENT"
+echo "LDAP Host: $LDAP_HOST"
+echo "LDAP Port: $LDAP_PORT"
+echo "Bind DN: $LDAP_SVC_USER"
+echo "User Base: $LDAP_USER_FQDN"
+```
+
+Get the LDAP service account password from CredHub or Ops Manager:
+
+```bash
+# Option 1: From CredHub
+LDAP_SVC_PASSWORD=$(credhub get -n /opsmgr/$DEPLOYMENT/nfs_volume_driver/enable/ldap_service_account_password -q)
+
+# Option 2: Manually from Ops Manager UI
+# TAS tile → Credentials → NFS Volume Services → LDAP Service Account Password
+LDAP_SVC_PASSWORD="<password_from_opsman>"
+```
+
+### Step 1: Check Application Logs for Error Messages
+
+```bash
+cf logs <app-name> --recent | grep -i -E "(error|fail|denied|mount|ldap)"
+```
+
+Common error messages and their meaning:
+
+| Error Message | Likely Cause |
+|---------------|--------------|
+| `User does not exist` | LDAP lookup failing - user missing `objectClass: User` or not found |
+| `LDAP server could not be reached` | Network/firewall blocking Diego cells from LDAP server |
+| `Authentication failed` | Wrong bind credentials or user password |
+| `Permission denied` (on write) | NFS export permissions or UID/GID mapping issue |
+| `mount.nfs: access denied` | NFS server not exporting to Diego cell IPs |
+
+### Step 2: Check nfsv3driver Logs on Diego Cell
+
+For more detailed error information:
+
+```bash
+bosh -d $DEPLOYMENT ssh diego_cell/0 -c "sudo cat /var/vcap/sys/log/nfsv3driver/nfsv3driver.stdout.log | tail -100"
+```
+
+Look for entries with `"level":"error"` that show the specific failure reason.
+
+### Step 3: Test Network Connectivity to LDAP Server
+
+Verify Diego cells can reach the LDAP server:
+
+```bash
+bosh -d $DEPLOYMENT ssh diego_cell/0 -c "nc -zv $LDAP_HOST $LDAP_PORT -w 5"
+```
+
+**Expected output:**
+```
+Connection to ldap.example.com (x.x.x.x) 636 port [tcp/ldaps] succeeded!
+```
+
+**If connection fails:**
+- Check firewall rules between Diego cell subnet and LDAP server
+- Verify LDAP server is listening on the configured port
+- Confirm LDAP hostname resolves correctly from Diego cells
+
+### Step 4: Test TLS/SSL Handshake
+
+Verify the TLS certificate is being presented:
+
+```bash
+bosh -d $DEPLOYMENT ssh diego_cell/0 -c "echo | openssl s_client -connect $LDAP_HOST:$LDAP_PORT -showcerts 2>/dev/null | head -20"
+```
+
+**Expected output should show:**
+- `CONNECTED`
+- `Certificate chain`
+- Certificate subject/issuer information
+
+### Step 5: Validate CA Certificate Trust
+
+Save the CA cert and test validation (run from Ops Manager or a jumpbox with LDAP connectivity):
+
+```bash
+# Save the CA cert
+echo "$LDAP_CA_CERT" > /tmp/ldap-ca.pem
+
+# Test TLS with CA validation
+openssl s_client -connect $LDAP_HOST:$LDAP_PORT -CAfile /tmp/ldap-ca.pem </dev/null 2>&1 | grep -E "verify|error"
+```
+
+**Expected output:**
+```
+verify return:1
+verify return:1
+```
+
+If you see `verify error`, the CA certificate in Ops Manager doesn't match the LDAP server's certificate chain.
+
+### Step 6: Test LDAP Bind and Search
+
+Test that the service account can bind and search for users (run from Ops Manager or jumpbox):
+
+```bash
+LDAPTLS_CACERT=/tmp/ldap-ca.pem ldapsearch -x -H ldaps://$LDAP_HOST:$LDAP_PORT \
+  -D "$LDAP_SVC_USER" -w "$LDAP_SVC_PASSWORD" \
+  -b "$LDAP_USER_FQDN" "(objectClass=User)" uid uidNumber gidNumber
+```
+
+**Expected output:**
+```
+# dev1, people, example.org
+dn: uid=dev1,ou=people,dc=example,dc=org
+uid: dev1
+uidNumber: 20003
+gidNumber: 10001
+
+# search result
+result: 0 Success
+```
+
+**If no results returned:**
+- Users may be missing `objectClass: User` (see "LDAP Schema Requirements" below)
+- Check `LDAP_USER_FQDN` points to correct OU
+
+**If bind fails:**
+- Verify `LDAP_SVC_USER` DN is correct
+- Verify `LDAP_SVC_PASSWORD` is correct
+- Check service account exists in LDAP
+
+### Step 7: Test Specific User Lookup
+
+Test the exact LDAP filter the nfsv3driver uses:
+
+```bash
+# Replace 'dev1' with the username from your service binding
+LDAPTLS_CACERT=/tmp/ldap-ca.pem ldapsearch -x -H ldaps://$LDAP_HOST:$LDAP_PORT \
+  -D "$LDAP_SVC_USER" -w "$LDAP_SVC_PASSWORD" \
+  -b "$LDAP_USER_FQDN" "(&(objectClass=User)(cn=dev1))" dn uidNumber gidNumber
+```
+
+This must return the user with `uidNumber` and `gidNumber` for NFS mounting to work.
+
+### Step 8: Verify NFS Server Exports
+
+Ensure the NFS server exports are accessible from Diego cells:
+
+```bash
+# Get the NFS server IP from your service configuration
 NFS_SERVER="192.168.50.224"
 
-# Get the deployment name
-DEPLOYMENT=$(bosh deployments --column=name | grep cf- | head -1 | tr -d ' ')
+# Test NFS port connectivity from Diego cell
+bosh -d $DEPLOYMENT ssh diego_cell/0 -c "nc -zv $NFS_SERVER 2049 -w 5"
+
+# Check NFS exports (from a host that can reach the NFS server)
+showmount -e $NFS_SERVER
+```
+
+### Step 9: Check Volume Mount Path in Application
+
+If LDAP is working but the app can't find the mount, verify the mount path:
+
+Update your app's manifest to diagnose:
+
+```yaml
+command: |
+  echo "=== NFS Volume Diagnostic ==="
+  echo "--- All mounts ---"
+  mount
+  echo "--- /var/vcap/data contents ---"
+  ls -la /var/vcap/data/
+  echo "--- VCAP_SERVICES ---"
+  echo $VCAP_SERVICES
+  sleep infinity
+```
+
+The mount path is available in `VCAP_SERVICES` under `volume_mounts[].container_dir`.
+
+### Step 10: Check NFS Mounts on Diego Cells
+
+To verify that the NFS volume is properly mounted on the Diego cells where your app is running:
+
+```bash
+# Set your NFS server IP
+NFS_SERVER="192.168.50.224"
 
 # Get unique Diego cell IDs where the app is running
-CELL_IDS=$(cf logs nfs-volume-test --recent | grep "creating container for instance" | grep -oP 'Cell \K[a-f0-9-]+' | uniq)
+CELL_IDS=$(cf logs <app-name> --recent | grep "creating container for instance" | grep -oP 'Cell \K[a-f0-9-]+' | uniq)
 
 # Check NFS mounts on each Diego cell where the app is deployed
 for CELL_ID in $CELL_IDS; do
   DIEGO_INSTANCE="diego_cell/$CELL_ID"
   echo "Checking $DIEGO_INSTANCE:"
-  bosh -d $DEPLOYMENT ssh $DIEGO_INSTANCE -c "mount | grep \"$NFS_SERVER\" | awk '{print \$3}'" 2>/dev/null | grep "^diego_cell.*stdout" | cut -d'|' -f2 | tr -d ' '
+  bosh -d $DEPLOYMENT ssh $DIEGO_INSTANCE -c "mount | grep \"$NFS_SERVER\"" 2>/dev/null | grep "stdout" | awk -F'|' '{print $2}'
 done
 ```
 
-This will show mount points from your NFS server across the Diego cells the app instances are running on, helping verify that the volume service is working correctly.
+This shows mount points from your NFS server across the Diego cells where app instances are running, confirming the volume service is working correctly.
+
+## LDAP Schema Requirements
+
+The TAS nfsv3driver uses a hardcoded LDAP filter: `(&(objectClass=User)(cn=<username>))`
+
+This `User` objectClass is an Active Directory convention. For OpenLDAP compatibility, you must:
+
+1. **Add a custom schema** defining `User` as an AUXILIARY objectClass
+2. **Add `objectClass: User`** to all users that need NFS access
+3. **Ensure users have `uidNumber` and `gidNumber`** attributes
+
+Example OpenLDAP schema (`nfs-user.schema`):
+```
+objectclass ( 1.3.6.1.4.1.99999.1.1
+    NAME 'User'
+    DESC 'TAS NFS Volume Services User compatibility class'
+    SUP top
+    AUXILIARY )
+```
+
+Example user entry:
+```ldif
+dn: uid=dev1,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+objectClass: User
+uid: dev1
+cn: dev1
+uidNumber: 20003
+gidNumber: 10001
+homeDirectory: /home/dev1
+...
+```
+
+## Troubleshooting Quick Reference
+
+| Symptom | Check | Solution |
+|---------|-------|----------|
+| "LDAP server could not be reached" | Step 3: Network connectivity | Open firewall from Diego cells to LDAP |
+| "User does not exist" | Step 7: User lookup | Add `objectClass: User` to LDAP user |
+| "Authentication failed" | Step 6: LDAP bind | Verify bind DN and password in Ops Manager |
+| TLS/certificate errors | Step 5: CA validation | Update CA cert in Ops Manager NFS config |
+| Mount succeeds but write fails | Step 8: NFS exports | Check NFS export permissions and UID mapping |
+| App can't find mount path | Step 9: Mount path | Use `/var/vcap/data/<service-name>` from VCAP_SERVICES |
+| Verify mounts are working | Step 10: Diego cell mounts | Check NFS mounts visible on Diego cells |
+
+## Additional Resources
+
+- [TAS NFS Volume Services Documentation](https://docs.vmware.com/en/VMware-Tanzu-Application-Service/index.html)
+- [Cloud Foundry Volume Services](https://docs.cloudfoundry.org/devguide/services/using-vol-services.html)
