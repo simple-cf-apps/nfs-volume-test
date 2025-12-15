@@ -150,9 +150,10 @@ echo "User Base: $LDAP_USER_FQDN"
 echo -e "LDAP Cert: \n$LDAP_CA_CERT"
 ```
 
-Get the LDAP service account password from CredHub or Ops Manager:
+Get the LDAP service account password from CredHub:
 
 ```bash
+credhub login --client-name=ops_manager --client-secret=$BOSH_CLIENT_SECRET
 LDAP_SVC_PASSWORD=$(credhub get -n /opsmgr/$DEPLOYMENT/nfs_volume_driver/enable/ldap_service_account_password --output-json | jq -r '.value.value')
 ```
 
